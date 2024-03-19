@@ -1,7 +1,7 @@
 import tkinter as tk
 
 def rapid():
-    game_type.pack_forget()
+    game_type   .pack_forget()
     rapid_button.pack_forget()
     bullet_button.pack_forget()
     blitz_button.pack_forget()

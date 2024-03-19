@@ -48,10 +48,13 @@ BOARD_Y = (WINDOW_HEIGHT - BOARD_HEIGHT) / 2
 IMAGE_PATH = path.join(path.dirname(__file__), 'PNG')
 STOCKFISH_PATH = path.join(path.dirname(__file__), 'stockfish\\stockfish-windows-x86-64-avx2')
 
+window.title('Chess AssIst V1.0 by Laurie J Sullivan - Copyright 2024')
 
-window.title('Chess AI')
+# TODO: Remove unwanted print statements & comments
 
-FEN_COL_TO_COL = {
+AUTO_MOVE_DELAY = 1000
+
+FEN_COL_MAP = {
     'a': 0,
     'b': 1,
     'c': 2,
@@ -62,7 +65,7 @@ FEN_COL_TO_COL = {
     'h': 7
 }
 
-FEN_ROW_TO_ROW = {
+FEN_ROW_MAP = {
     '1': 7,
     '2': 6,
     '3': 5,
@@ -73,7 +76,57 @@ FEN_ROW_TO_ROW = {
     '8': 0
 }
 
-class Chessboard():
+COL_FEN_MAP = {
+    0: 'a',
+    1: 'b',
+    2: 'c',
+    3: 'd',
+    4: 'e',
+    5: 'f',
+    6: 'g',
+    7: 'h'
+}
+
+ROW_FEN_MAP = {
+    0: '1',
+    1: '2',
+    2: '3',
+    3: '4',
+    4: '5',
+    5: '6',
+    6: '7',
+    7: '8'
+}
+
+
+class Move(object):
+    def __init__(self, row, col):
+        self.row = row
+        self.col = col
+
+    def __eq__(self, other_move):
+        # This comparison op allows a list of Move instances to be searched for a matching Move instance
+        return self.row == other_move.row and self.col == other_move.col
+
+# Record of a piece being 'taken'
+class Take(object):
+    def __init__(
+            self,
+            taking_piece,
+            taken_piece):
+        # 'flattening' the pieces may make it easier to search for takes, later
+        self.taking_piece = taking_piece
+        self.taking_piece_type = taking_piece.type
+        self.taking_piece_row = taking_piece.row
+        self.taking_piece_col = taking_piece.col
+        self.taking_piece_colour = taking_piece.colour
+        self.taken_piece = taken_piece
+        self.taken_piece_type = taken_piece.type
+        self.taken_piece_row = taken_piece.row
+        self.taken_piece_col = taken_piece.col
+        self.taken_piece_colour = taken_piece.colour
+
+class Chessboard(object):
 
     def __init__(self, width, height):
         self.width = width
@@ -82,6 +135,10 @@ class Chessboard():
         self.status_label = None
         self.selected_square = None
         self.valid_moves = []
+        self.taking_moves = []
+        # TODO: Manage these from the menu
+        self.auto_move_black = True
+        self.auto_move_white = False
 
         # IMPORTANT the code assumes WHITE is always at the bottom of the board
         # Things will go wrong if we mess with that assumption!!!
@@ -101,6 +158,8 @@ class Chessboard():
                              highlightthickness=BOARD_BORDER_THICKNESS)
         # Handle mouse clicks
         self.canvas.bind('<Button-1>', self.handle_left_click)
+        self.canvas.bind('<Button-3>', self.handle_right_click)
+
         self.canvas.pack(expand=True)
 
         # Build and setup board
@@ -109,7 +168,6 @@ class Chessboard():
 
         # THIS is the CLEVER bit!
         self.stockfish = Stockfish(path=STOCKFISH_PATH)
-        self.stockfish.set_fen_position(self.generate_fen_position())
 
     def create_board(self):
         squares = []
@@ -148,6 +206,12 @@ class Chessboard():
                 Image.open(os.path.join(IMAGE_PATH, 'w_pawn.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))]
         }
 
+        self.turn_colour = None
+        self.status_label = None
+        self.selected_square = None
+        self.valid_moves = []
+        self.taking_moves = []
+
         for row in range(NUM_ROWS):
             for col in range(NUM_COLS):
                 piece_type = layout[row][col]
@@ -156,6 +220,12 @@ class Chessboard():
                         colour = WHITE_PIECE
                     else:
                         colour = BLACK_PIECE
+
+                    # For the next line of code (below)
+                    # Each VALUE from the piece_types DICTIONARY is a LIST.  So...
+                    # [piece_type] selects the correct LIST from the dictionary
+                    # [0] selects the CLASS from the selected LIST
+                    # [1] selects the piece's IMAGE from the selected LIST
                     squares[row][col].current_piece = piece_types[piece_type][0](self.squares,
                                                                                  piece_type,
                                                                                  piece_types[piece_type][1],
@@ -165,30 +235,18 @@ class Chessboard():
         for row in range(NUM_ROWS):
             for col in range(NUM_COLS):
                 self.squares[row][col].draw()
-        self.set_next_turn()
 
     def handle_left_click(self, event):
-        # TODO: Remove print statements
-        #print('Mouse position: (%s %s)' % (event.x, event.y))
+        if (self.turn_colour == BLACK_PIECE and self.auto_move_black) or \
+                (self.turn_colour == WHITE_PIECE and self.auto_move_white):
+            # We'll mess things up if we process clicks while doing auto-play
+            return
+
         row = int(event.y / ROW_HEIGHT)
         col = int(event.x / COL_WIDTH)
-        #print('Row.col: (%s %s)' % (row, col))
-
-        self.stockfish.set_fen_position(self.generate_fen_position())
-        print(self.stockfish.get_board_visual())
-        #fen_move = self.stockfish.get_best_move()
-
-        # Introduce some more random play (try to avoid endless loop / stalemate / draw)
-        fen_move = self.stockfish.get_top_moves(3)[random.randint(0,2)]['Move']
-        print(fen_move)
-        self.do_fen_move(fen_move)
-        return
 
         if self.selected_square is not None and self.is_valid_destination(row, col):
             self.do_move(row, col)
-            self.stockfish.set_fen_position(self.generate_fen_position())
-            print(self.stockfish.get_board_visual())
-            print('\n')
             return
 
         prev_selection = self.selected_square
@@ -209,6 +267,22 @@ class Chessboard():
                 for destination in self.valid_moves:
                     self.squares[destination.row][destination.col].highlight(True, DESTINATION_HIGHLIGHT)
 
+    def handle_right_click(self, event):
+        if (self.turn_colour == BLACK_PIECE and self.auto_move_black) or \
+                (self.turn_colour == WHITE_PIECE and self.auto_move_white):
+            # We'll mess things up if we process clicks while doing auto-play
+            return
+
+        self.stockfish.set_fen_position(self.generate_fen_position())
+        # print(self.stockfish.get_board_visual())
+
+        # TODO: Introduce some more random play (try to avoid endless loop / stalemate / draw)
+        #       Maybe something like this....?
+        # fen_move = self.stockfish.get_top_moves(3)[random.randint(0,2)]['Move']
+        fen_move = self.stockfish.get_best_move()
+        # print(fen_move)
+        self.highlight_fen_move(fen_move)
+
     def is_valid_destination(self, row, col):
         # NOTE: We could just flag individual squares as valid destination, when we highlight/un-highlight
         for move in self.valid_moves:
@@ -217,24 +291,49 @@ class Chessboard():
         return False
 
     def clear_current_moves(self):
-        self.selected_square.highlight(False)
+        if self.selected_square is not None:
+            self.selected_square.highlight(False)
         for destination in self.valid_moves:
             self.squares[destination.row][destination.col].highlight(False)
         self.valid_moves = []
 
-    def do_fen_move(self, fen_move):
+    def highlight_fen_move(self, fen_move):
         if fen_move is None or len(fen_move) != 4:
             return None
-        self.selected_square = self.squares[FEN_ROW_TO_ROW[fen_move[1]]][FEN_COL_TO_COL[fen_move[0]]]
-        self.do_move(FEN_ROW_TO_ROW[fen_move[3]], FEN_COL_TO_COL[fen_move[2]])
+        self.clear_current_moves()
+        self.selected_square = self.squares[FEN_ROW_MAP[fen_move[1]]][FEN_COL_MAP[fen_move[0]]]
+        recommended_move = Move(FEN_ROW_MAP[fen_move[3]], FEN_COL_MAP[fen_move[2]])
+        self.valid_moves = [recommended_move]
+        self.selected_square.highlight(True, SELECTION_HIGHLIGHT)
+        self.squares[recommended_move.row][recommended_move.col].highlight(True, DESTINATION_HIGHLIGHT)
+
+    def fen_move_from_row_col(self, origin_row, origin_col, dest_row, dest_col):
+        fen_move = ''
+        fen_move += COL_FEN_MAP[origin_row]
+        fen_move += ROW_FEN_MAP[origin_col]
+        fen_move += COL_FEN_MAP[dest_row]
+        fen_move += ROW_FEN_MAP[dest_col]
+        return fen_move
+
+    def do_preset_move(self):
+        # Execute a specific move (stored in the first Move in self.valid moves)
+        # This is usually called on a Tkinter delay (using after()) to allow the
+        # display to be updated before making this move.
+        self.do_move(self.valid_moves[0].row, self.valid_moves[0].col)
 
     def do_move(self, row, col):
         self.clear_current_moves()
         piece = self.selected_square.current_piece
         self.selected_square.set_current_piece(None)
+        self.record_take(piece, self.squares[row][col].current_piece)
         self.squares[row][col].set_current_piece(piece)
         self.selected_square = None
         self.set_next_turn()
+
+    def record_take(self, taking_piece, taken_piece):
+        if taking_piece is None or taken_piece is None:
+            return
+        self.taking_moves.append(Take(taking_piece, taken_piece))
 
     def remove_self_checking_moves(self, moving_square, moves):
         # Pick up the piece which will move
@@ -245,7 +344,7 @@ class Chessboard():
         for move in moves:
             taken_piece = self.squares[move.row][move.col].current_piece
             self.squares[move.row][move.col].current_piece = moving_piece
-            if self.is_checked(self.turn_colour):
+            if self.is_check(self.turn_colour):
                 checking_moves.append(move)
             # Replace anything we temporarily took
             self.squares[move.row][move.col].current_piece = taken_piece
@@ -260,25 +359,49 @@ class Chessboard():
         return moves
 
     def set_next_turn(self):
+        # TODO: BUG - not stopping game after detecting checkmate
+
         last_turn_colour = self.turn_colour
         if self.turn_colour == WHITE_PIECE:
             self.turn_colour = BLACK_PIECE
         else:
             self.turn_colour = WHITE_PIECE
 
-        if self.is_checkmated(self.turn_colour):
+        if self.is_checkmate(self.turn_colour):
             # THE END! (no valid moves found)
-            self.turn_colour = None
             message = 'CHECKMATE! GAME OVER! {0} WINS!'.format(last_turn_colour.upper())
+            self.turn_colour = None
+            self.show_game_takes()
+            return
         else:
-            message = 'Next move: {0}'.format(self.turn_colour.upper())
+            if (self.turn_colour == BLACK_PIECE and self.auto_move_black) or \
+                    (self.turn_colour == WHITE_PIECE and self.auto_move_white):
+                mode = 'auto'
+            else:
+                mode = 'manual'
+            message = 'Next move: {0} ({1})'.format(self.turn_colour.upper(), mode)
         if self.status_label is None:
             self.status_label = Label(window, justify=CENTER, font=('Helvetica', 24))
         self.status_label.configure(text=message)
         self.status_label.pack()
 
-    def is_checkmated(self, colour):
-        if not self.is_checked(colour):
+        if (self.turn_colour == BLACK_PIECE and self.auto_move_black) or \
+                (self.turn_colour == WHITE_PIECE and self.auto_move_white):
+            self.stockfish.set_fen_position(self.generate_fen_position())
+            fen_move = self.stockfish.get_best_move()
+            self.highlight_fen_move(fen_move)
+            window.after(AUTO_MOVE_DELAY, self.do_preset_move)
+
+    def show_game_takes(self):
+        # TODO: Display this info on the main app window, as the game progresses (not at the end)?
+        for take in self.taking_moves:
+            print('Move:{0} -> {1} takes {2}'.format(
+                self.fen_move_from_row_col(take.taking_piece_row, take.taking_piece_col,
+                                                 take.taken_piece_row, take.taken_piece_col),
+                take.taking_piece_type, take.taken_piece_type))
+
+    def is_checkmate(self, colour):
+        if not self.is_check(colour):
             return False
         for row in self.squares:
             for square in row:
@@ -289,7 +412,7 @@ class Chessboard():
                     pass
 
         return True
-    def is_checked(self, colour):
+    def is_check(self, colour):
         king_pos = self.get_king_pos(colour)
         if colour == WHITE_PIECE:
             enemy_colour = BLACK_PIECE
@@ -350,7 +473,7 @@ class Chessboard():
         return fen_pos
 
 
-class Square():
+class Square(object):
     def __init__(self, canvas, row, col, height, width):
         super().__init__()
         self.canvas = canvas
@@ -403,7 +526,7 @@ class Square():
                                      outline=outline_colour, width=HIGHLIGHT_THICKNESS)
 
 
-class Piece():
+class Piece(object):
     def __init__(self, board_squares, type, image, colour, row, col):
         super().__init__()
         self.board_squares = board_squares
@@ -427,13 +550,6 @@ class Piece():
         canvas.pack()
 
 
-class Move():
-    def __init__(self, row, col):
-        self.row = row
-        self.col = col
-
-    def __eq__(self, other_move):
-        return self.row == other_move.row and self.col == other_move.col
 class Rook(Piece):
     def __init__(self, board_squares, type, image, colour, row, col):
         super().__init__(board_squares, type, image, colour, row, col)
@@ -510,6 +626,7 @@ class Knight(Piece):
 
         return moves
 
+
 class Bishop(Piece):
     def __init__(self, board_squares, type, image, colour, row, col):
         super().__init__(board_squares, type, image, colour, row, col)
@@ -519,7 +636,7 @@ class Bishop(Piece):
         # CHECK HORIZONTAL MOVES
         # Get right-up moves
         row = self.row
-        for col in range(self.col + 1, 8):
+        for col in range(self.col + 1, NUM_COLS):
             row -= 1
             if row < 0:
                 break
@@ -544,9 +661,9 @@ class Bishop(Piece):
         # CHECK VERTICAL MOVES
         # Get right-down moves
         col = self.col
-        for row in range(self.row + 1, 8):
+        for row in range(self.row + 1, NUM_COLS):
             col += 1
-            if col >= 8:
+            if col >= NUM_COLS:
                 break
             if self.board_squares[row][col].current_piece is not None:
                 if self.board_squares[row][col].current_piece.colour != self.colour:
@@ -556,7 +673,7 @@ class Bishop(Piece):
                 moves.append(Move(row, col))
         # Get left-down moves
         col = self.col
-        for row in range(self.row + 1, 8):
+        for row in range(self.row + 1, NUM_COLS):
             col -= 1
             if col < 0:
                 break
@@ -568,6 +685,8 @@ class Bishop(Piece):
                 moves.append(Move(row, col))
 
         return moves
+
+
 class Pawn(Piece):
     def __init__(self, board_squares, type, image, colour, row, col):
         super().__init__(board_squares, type, image, colour, row, col)
@@ -612,7 +731,7 @@ class Queen(Piece):
         moves = []
         # CHECK HORIZONTAL MOVES
         # Get right-moves
-        for col in range(self.col + 1, 8):
+        for col in range(self.col + 1, NUM_COLS):
             if self.board_squares[self.row][col].current_piece is not None:
                 if self.board_squares[self.row][col].current_piece.colour != self.colour:
                     moves.append(Move(self.row, col))
@@ -629,7 +748,7 @@ class Queen(Piece):
                 moves.append(Move(self.row, col))
         # CHECK VERTICAL MOVES
         # Get down-moves
-        for row in range(self.row + 1, 8):
+        for row in range(self.row + 1, NUM_COLS):
             if self.board_squares[row][self.col].current_piece is not None:
                 if self.board_squares[row][self.col].current_piece.colour != self.colour:
                     moves.append(Move(row, self.col))
@@ -648,7 +767,7 @@ class Queen(Piece):
         # CHECK HORIZONTAL MOVES
         # Get right-up moves
         row = self.row
-        for col in range(self.col + 1, 8):
+        for col in range(self.col + 1, NUM_COLS):
             row -= 1
             if row < 0:
                 break
@@ -673,7 +792,7 @@ class Queen(Piece):
         # CHECK VERTICAL MOVES
         # Get right-down moves
         col = self.col
-        for row in range(self.row + 1, 8):
+        for row in range(self.row + 1, NUM_COLS):
             col += 1
             if col >= 8:
                 break
@@ -685,7 +804,7 @@ class Queen(Piece):
                 moves.append(Move(row, col))
         # Get left-down moves
         col = self.col
-        for row in range(self.row + 1, 8):
+        for row in range(self.row + 1, NUM_COLS):
             col -= 1
             if col < 0:
                 break
@@ -697,6 +816,7 @@ class Queen(Piece):
                 moves.append(Move(row, col))
 
         return moves
+
 
 class King(Piece):
     def __init__(self, board_squares, type, image, colour, row, col):
@@ -714,7 +834,13 @@ class King(Piece):
                         moves.append(Move(row, col))
 
         return moves
+
+
+# New board-instance
 chessboard = Chessboard(BOARD_WIDTH, BOARD_HEIGHT)
+# Draw the board
 chessboard.draw()
+# Start the game
+chessboard.set_next_turn()
 
 window.mainloop()
