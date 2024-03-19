@@ -1,9 +1,11 @@
-from tkinter import *
-from PIL import Image, ImageTk
-import random
 
 import os
+import time
+import random
 from os import path
+from tkinter import *
+from PIL import Image, ImageTk
+from stockfish import Stockfish
 
 window = Tk()
 
@@ -26,7 +28,7 @@ NUM_COLS = 8
 
 WINDOW_WIDTH = 1000
 WINDOW_HEIGHT = 1000
-window.geometry("{0}x{1}".format(WINDOW_WIDTH, WINDOW_HEIGHT))
+window.geometry('{0}x{1}'.format(WINDOW_WIDTH, WINDOW_HEIGHT))
 
 BOARD_WIDTH = 800
 BOARD_HEIGHT = 800
@@ -43,12 +45,36 @@ IMAGE_HEIGHT = ROW_HEIGHT - (2 * IMAGE_BORDER_THICKNESS)
 BOARD_X = (WINDOW_WIDTH - BOARD_WIDTH) / 2
 BOARD_Y = (WINDOW_HEIGHT - BOARD_HEIGHT) / 2
 
-return_path = path.join(path.dirname(__file__), 'PNG')
+IMAGE_PATH = path.join(path.dirname(__file__), 'PNG')
+STOCKFISH_PATH = path.join(path.dirname(__file__), 'stockfish\\stockfish-windows-x86-64-avx2')
 
-window.title("Chess AI")
 
+window.title('Chess AI')
+
+FEN_COL_TO_COL = {
+    'a': 0,
+    'b': 1,
+    'c': 2,
+    'd': 3,
+    'e': 4,
+    'f': 5,
+    'g': 6,
+    'h': 7
+}
+
+FEN_ROW_TO_ROW = {
+    '1': 7,
+    '2': 6,
+    '3': 5,
+    '4': 4,
+    '5': 3,
+    '6': 2,
+    '7': 1,
+    '8': 0
+}
 
 class Chessboard():
+
     def __init__(self, width, height):
         self.width = width
         self.height = height
@@ -60,14 +86,14 @@ class Chessboard():
         # IMPORTANT the code assumes WHITE is always at the bottom of the board
         # Things will go wrong if we mess with that assumption!!!
         self.initial_layout = [
-            ["br", "bkn", "bb", "bq", "bk", "bb", "bkn", "br"],
-            ["bp", "bp", "bp", "bp", "bp", "bp", "bp", "bp"],
-            [" ", " ", " ", " ", " ", " ", " ", " "],
-            [" ", " ", " ", " ", " ", " ", " ", " "],
-            [" ", " ", " ", " ", " ", " ", " ", " "],
-            [" ", " ", " ", " ", " ", " ", " ", " "],
-            ["wp", "wp", "wp", "wp", "wp", "wp", "wp", "wp"],
-            ["wr", "wkn", "wb", "wq", "wk", "wb", "wkn", "wr"],
+            ['br', 'bn', 'bb', 'bq', 'bk', 'bb', 'bn', 'br'],
+            ['bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp'],
+            [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+            ['wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp'],
+            ['wr', 'wn', 'wb', 'wq', 'wk', 'wb', 'wn', 'wr'],
         ]
         # Create our canvas
         self.canvas = Canvas(window, width=BOARD_WIDTH, height=BOARD_HEIGHT, bg='red',
@@ -81,6 +107,10 @@ class Chessboard():
         self.squares = self.create_board()
         self.setup_board(self.squares, self.initial_layout)
 
+        # THIS is the CLEVER bit!
+        self.stockfish = Stockfish(path=STOCKFISH_PATH)
+        self.stockfish.set_fen_position(self.generate_fen_position())
+
     def create_board(self):
         squares = []
         for row in range(NUM_ROWS):
@@ -92,36 +122,36 @@ class Chessboard():
 
     def setup_board(self, squares, layout):
         piece_types = {
-            "br": [Rook, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "b_rook.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "bkn": [Knight, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "b_knight.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "bb": [Bishop, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "b_bishop.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "bq": [Queen, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "b_queen.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "bk": [King, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "b_king.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "bp": [Pawn, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "b_pawn.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "wr": [Rook, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "w_rook.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "wkn": [Knight, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "w_knight.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "wb": [Bishop, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "w_bishop.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "wq": [Queen, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "w_queen.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "wk": [King, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "w_king.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
-            "wp": [Pawn, ImageTk.PhotoImage(
-                Image.open(os.path.join(return_path, "w_pawn.png")).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))]
+            'br': [Rook, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'b_rook.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'bn': [Knight, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'b_knight.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'bb': [Bishop, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'b_bishop.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'bq': [Queen, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'b_queen.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'bk': [King, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'b_king.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'bp': [Pawn, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'b_pawn.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'wr': [Rook, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'w_rook.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'wn': [Knight, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'w_knight.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'wb': [Bishop, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'w_bishop.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'wq': [Queen, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'w_queen.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'wk': [King, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'w_king.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))],
+            'wp': [Pawn, ImageTk.PhotoImage(
+                Image.open(os.path.join(IMAGE_PATH, 'w_pawn.png')).resize((IMAGE_WIDTH, IMAGE_HEIGHT)))]
         }
 
         for row in range(NUM_ROWS):
             for col in range(NUM_COLS):
                 piece_type = layout[row][col]
-                if piece_type != " ":
+                if piece_type != ' ':
                     if piece_type[0] == 'w':
                         colour = WHITE_PIECE
                     else:
@@ -139,13 +169,26 @@ class Chessboard():
 
     def handle_left_click(self, event):
         # TODO: Remove print statements
-        #print("Mouse position: (%s %s)" % (event.x, event.y))
+        #print('Mouse position: (%s %s)' % (event.x, event.y))
         row = int(event.y / ROW_HEIGHT)
         col = int(event.x / COL_WIDTH)
-        #print("Row.col: (%s %s)" % (row, col))
+        #print('Row.col: (%s %s)' % (row, col))
+
+        self.stockfish.set_fen_position(self.generate_fen_position())
+        print(self.stockfish.get_board_visual())
+        #fen_move = self.stockfish.get_best_move()
+
+        # Introduce some more random play (try to avoid endless loop / stalemate / draw)
+        fen_move = self.stockfish.get_top_moves(3)[random.randint(0,2)]['Move']
+        print(fen_move)
+        self.do_fen_move(fen_move)
+        return
 
         if self.selected_square is not None and self.is_valid_destination(row, col):
             self.do_move(row, col)
+            self.stockfish.set_fen_position(self.generate_fen_position())
+            print(self.stockfish.get_board_visual())
+            print('\n')
             return
 
         prev_selection = self.selected_square
@@ -179,14 +222,19 @@ class Chessboard():
             self.squares[destination.row][destination.col].highlight(False)
         self.valid_moves = []
 
+    def do_fen_move(self, fen_move):
+        if fen_move is None or len(fen_move) != 4:
+            return None
+        self.selected_square = self.squares[FEN_ROW_TO_ROW[fen_move[1]]][FEN_COL_TO_COL[fen_move[0]]]
+        self.do_move(FEN_ROW_TO_ROW[fen_move[3]], FEN_COL_TO_COL[fen_move[2]])
+
     def do_move(self, row, col):
         self.clear_current_moves()
         piece = self.selected_square.current_piece
         self.selected_square.set_current_piece(None)
         self.squares[row][col].set_current_piece(piece)
         self.selected_square = None
-        if not self.check_game_state():
-            self.set_next_turn()
+        self.set_next_turn()
 
     def remove_self_checking_moves(self, moving_square, moves):
         # Pick up the piece which will move
@@ -210,11 +258,6 @@ class Chessboard():
             moves.remove(bad_move)
         
         return moves
-    
-    def check_game_state(self):
-        # TODO: Check for check, mate, and draw/stalemate
-        # return True if game finished
-        return False
 
     def set_next_turn(self):
         last_turn_colour = self.turn_colour
@@ -230,7 +273,7 @@ class Chessboard():
         else:
             message = 'Next move: {0}'.format(self.turn_colour.upper())
         if self.status_label is None:
-            self.status_label = Label(window, justify=CENTER, font=("Helvetica", 24))
+            self.status_label = Label(window, justify=CENTER, font=('Helvetica', 24))
         self.status_label.configure(text=message)
         self.status_label.pack()
 
@@ -265,9 +308,9 @@ class Chessboard():
 
     def get_king_pos(self, colour):
         if colour == WHITE_PIECE:
-            king_type = "wk"
+            king_type = 'wk'
         else:
-            king_type = "bk"
+            king_type = 'bk'
         for row in self.squares:
             for square in row:
                 try:
@@ -277,6 +320,35 @@ class Chessboard():
                 except AttributeError:
                     pass
         return None
+
+    def generate_fen_position(self):
+        fen_pos = ''
+        for row in self.squares:
+            for square in row:
+                try:
+                    piece_type = square.current_piece.type[1:]
+                    if square.current_piece.colour == WHITE_PIECE:
+                        fen_pos += piece_type.upper()
+                    else:
+                        # The piece types are already lower case
+                        # but we set the case explicitly
+                        # (just in case that ever changes)
+                        fen_pos += piece_type.lower()
+                except AttributeError:
+                    # TODO: We can shorten the FEN position string by replacing
+                    #       multiple '1's with a single digit, representing the
+                    #       number of contiguous empty squares (we just need count them)
+                    fen_pos += '1'  # Empty square
+            fen_pos += '/'
+        # Don't want the final '/'
+        fen_pos = fen_pos[0:-1]
+        if self.turn_colour == WHITE_PIECE:
+            fen_pos += ' w'
+        else:
+            fen_pos += ' b'
+        fen_pos += ' - - 0 1'
+        return fen_pos
+
 
 class Square():
     def __init__(self, canvas, row, col, height, width):
@@ -351,7 +423,7 @@ class Piece():
         return []
 
     def draw(self, canvas, x, y):
-        canvas.create_image(x, y, image=self.image, anchor="center")
+        canvas.create_image(x, y, image=self.image, anchor='center')
         canvas.pack()
 
 
